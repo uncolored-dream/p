@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>3D Bahdanau (2015) Encoder-Decoder Attention Visualizer</title>
+
+  <!-- KaTeX CDN for exact Bahdanau 2015 Equations -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+
+  <!-- Three.js ES Module Import Map -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <style>
+    :root {
+      --bg-deep: #0b0f19;
+      --glass-bg: rgba(15, 23, 42, 0.80);
+      --glass-border: rgba(255, 255, 255, 0.12);
+      --cyan: #00f2fe;
+      --magenta: #ff0844;
+      --gold: #f6d365;
+      --emerald: #10b981;
+      --purple: #a855f7;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-deep);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--text-main);
+    }
+
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+    }
+
+    /* 3D World Projected Labels */
+    #labels-container {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 2;
+      overflow: hidden;
+    }
+
+    .world-label {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 7px;
+      border-radius: 6px;
+      background: rgba(11, 15, 25, 0.86);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      color: #e2e8f0;
+      white-space: nowrap;
+      pointer-events: auto;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .world-label:hover {
+      border-color: var(--cyan);
+    }
+
+    .world-label.active-target {
+      background: rgba(16, 185, 129, 0.22);
+      border-color: var(--emerald);
+      color: #fff;
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.45);
+    }
+
+    .world-label.context-hub {
+      background: rgba(246, 211, 101, 0.18);
+      border-color: var(--gold);
+      color: var(--gold);
+      box-shadow: 0 0 14px rgba(246, 211, 101, 0.35);
+      pointer-events: none;
+    }
+
+    .world-label.stage-header {
+      background: rgba(15, 23, 42, 0.92);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      color: #38bdf8;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+
+    .weight-badge {
+      display: inline-block;
+      margin-left: 4px;
+      padding: 1px 4px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.12);
+      color: var(--gold);
+      font-family: monospace;
+      font-size: 10px;
+    }
+
+    /* Top Bar */
+    #top-bar {
+      position: fixed;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      width: min(95vw, 800px);
+      background: var(--glass-bg);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      padding: 10px 14px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .app-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      background: linear-gradient(90deg, var(--cyan), var(--gold), var(--emerald));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    select.preset-select {
+      background: rgba(30, 41, 59, 0.9);
+      color: var(--text-main);
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-size: 12px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .pill-bar-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    #target-pills {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+    }
+
+    .token-pill {
+      background: rgba(30, 41, 59, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: var(--text-main);
+      padding: 5px 11px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .token-pill:hover {
+      border-color: var(--emerald);
+    }
+
+    .token-pill.active {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.3), rgba(0, 242, 254, 0.3));
+      border-color: var(--emerald);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+    }
+
+    /* Collapsible Control Drawer */
+    #control-drawer {
+      position: fixed;
+      top: 115px;
+      right: 14px;
+      z-index: 10;
+      width: 315px;
+      max-height: calc(100vh - 240px);
+      display: flex;
+      flex-direction: column;
+      background: var(--glass-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      overflow: hidden;
+    }
+
+    #control-drawer.collapsed {
+      transform: translateX(calc(100% + 20px));
+    }
+
+    #drawer-toggle {
+      position: fixed;
+      top: 115px;
+      right: 14px;
+      z-index: 11;
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      color: var(--text-main);
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+    }
+
+    .drawer-content {
+      padding: 44px 14px 14px 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .control-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .control-value {
+      color: var(--gold);
+      font-family: monospace;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--gold);
+      cursor: pointer;
+    }
+
+    .btn-group {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+    }
+
+    .seg-btn {
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+      padding: 7px 6px;
+      border-radius: 7px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s;
+      text-align: center;
+    }
+
+    .seg-btn.active {
+      background: rgba(246, 211, 101, 0.18);
+      color: #fff;
+      border-color: var(--gold);
+    }
+
+    /* Alignment Matrix Heatmap */
+    #heatmap-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      background: rgba(11, 15, 25, 0.65);
+      padding: 8px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    #heatmap-canvas {
+      width: 100%;
+      max-width: 245px;
+      height: auto;
+      aspect-ratio: 1 / 1;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .legend-bar {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 4px;
+    }
+
+    /* Bottom Step-by-Step Math Scrubber */
+    #bottom-hud {
+      position: fixed;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      width: min(95vw, 800px);
+      background: var(--glass-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+    }
+
+    .stepper-row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 5px;
+    }
+
+    .step-btn {
+      background: rgba(30, 41, 59, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+      padding: 6px 4px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .step-btn.active {
+      background: linear-gradient(135deg, rgba(246, 211, 101, 0.25), rgba(16, 185, 129, 0.28));
+      color: #fff;
+      border-color: var(--gold);
+    }
+
+    .math-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    #math-desc {
+      font-size: 12px;
+      color: #e2e8f0;
+      line-height: 1.4;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    #math-formula {
+      background: rgba(11, 15, 25, 0.78);
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 13px;
+      overflow-x: auto;
+    }
+
+    @media (max-width: 640px) {
+      #control-drawer {
+        top: auto;
+        bottom: 148px;
+        right: 10px;
+        width: calc(100vw - 20px);
+        max-height: 46vh;
+      }
+      #drawer-toggle {
+        top: 105px;
+        right: 10px;
+      }
+      .stepper-row {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      #math-formula {
+        width: 100%;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 3D WebGL Canvas -->
+  <div id="canvas-container"></div>
+
+  <!-- Crisp 2D Projected Labels Overlay -->
+  <div id="labels-container"></div>
+
+  <!-- Top Bar: Translation Pair & Decoder Timestep Selector -->
+  <div id="top-bar">
+    <div class="top-row">
+      <span class="app-title">BAHDANAU ET AL. (2015) • JOINT ALIGNMENT & TRANSLATION</span>
+      <select id="preset-select" class="preset-select">
+        <option value="0">EN → FR: "European Economic Area" (Adjective Inversion)</option>
+        <option value="1">EN → HI: "I am studying AI" (SOV Word-Order Shift)</option>
+        <option value="2">FR → EN: "Le chat noir dort" (Noun-Adjective Swap)</option>
+      </select>
+    </div>
+    <div id="target-pills"></div>
+  </div>
+
+  <!-- Drawer Toggle Button -->
+  <button id="drawer-toggle" title="Toggle Controls">
+    <span>⚙️ Alignment Matrix & Controls</span>
+  </button>
+
+  <!-- Collapsible Right Control Panel -->
+  <aside id="control-drawer">
+    <div class="drawer-content">
+      <div class="control-group">
+        <div class="control-label">
+          <span>Architecture Mode</span>
+          <span id="mode-label" class="control-value">Bahdanau Attn</span>
+        </div>
+        <div class="btn-group" id="mode-buttons">
+          <button class="seg-btn active" data-bottleneck="false">Joint Attention (cᵢ)</button>
+          <button class="seg-btn" data-bottleneck="true">Fixed Bottleneck (h_T)</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Auto-Decode Playback</span>
+          <span id="play-status" class="control-value">Paused</span>
+        </div>
+        <div class="btn-group">
+          <button class="seg-btn" id="play-btn">▶ Play Steps</button>
+          <button class="seg-btn" id="step-next-btn">⏭ Next Token</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Alignment Sharpness (τ)</span>
+          <span id="temp-val" class="control-value">0.75</span>
+        </div>
+        <input type="range" id="temp-slider" min="0.2" max="2.5" step="0.05" value="0.75" />
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>2D Soft-Alignment Matrix (αᵢⱼ)</span>
+        </div>
+        <div id="heatmap-wrapper">
+          <canvas id="heatmap-canvas" width="245" height="245"></canvas>
+          <div class="legend-bar">
+            <span><i class="dot" style="background:#00f2fe"></i>BiRNN hⱼ</span>
+            <span><i class="dot" style="background:#f6d365"></i>Context cᵢ</span>
+            <span><i class="dot" style="background:#10b981"></i>Decoder sᵢ</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Bottom Step-by-Step Math Scrubber -->
+  <div id="bottom-hud">
+    <div class="stepper-row" id="stepper-buttons">
+      <button class="step-btn active" data-step="0">0. Full Pipeline</button>
+      <button class="step-btn" data-step="1">1. BiRNN Annotations hⱼ</button>
+      <button class="step-btn" data-step="2">2. Alignment Model eᵢⱼ</button>
+      <button class="step-btn" data-step="3">3. Softmax & Context cᵢ</button>
+      <button class="step-btn" data-step="4">4. Decoder State sᵢ & yᵢ</button>
+    </div>
+    <div class="math-card">
+      <div id="math-desc">Click any Target Decoder token yᵢ above (or in 3D space) to see how the Decoder queries the BiRNN Encoder annotations hⱼ to build a dynamic Context Vector cᵢ.</div>
+      <div id="math-formula"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // ==========================================
+    // 1. NMT PRESETS (BAHDANAU 2015 ALIGNMENTS)
+    // ==========================================
+    const PRESETS = [
+      {
+        // Classic Bahdanau 2015 paper example showing non-monotonic adjective inversion
+        source: ["Wait", "for", "the", "European", "Economic", "Area"],
+        target: ["Attendez", "la", "zone", "économique", "européenne"],
+        // rows = target i, cols = source j (raw alignment energy e_ij)
+        energies: [
+          [3.2, 1.8, 0.2, 0.1, 0.1, 0.1], // "Attendez" -> "Wait", "for"
+          [0.2, 0.4, 3.3, 0.3, 0.2, 0.5], // "la" -> "the"
+          [0.1, 0.1, 0.4, 0.3, 0.4, 3.5], // "zone" -> "Area" (jumps to end!)
+          [0.1, 0.1, 0.2, 0.4, 3.4, 0.4], // "économique" -> "Economic"
+          [0.1, 0.1, 0.2, 3.5, 0.4, 0.3]  // "européenne" -> "European"
+        ]
+      },
+      {
+        // English (SVO) to Romanized Hindi (SOV) reordering
+        source: ["I", "am", "studying", "Artificial", "Intelligence"],
+        target: ["Main", "AI", "padh", "raha", "hoon"],
+        energies: [
+          [3.5, 0.3, 0.2, 0.1, 0.1], // "Main" -> "I"
+          [0.1, 0.1, 0.3, 3.2, 3.3], // "AI" -> "Artificial", "Intelligence"
+          [0.2, 0.4, 3.4, 0.3, 0.3], // "padh" -> "studying"
+          [0.2, 1.8, 2.8, 0.2, 0.2], // "raha" -> "studying" / "am"
+          [0.4, 3.4, 0.6, 0.1, 0.1]  // "hoon" -> "am" (jumps to verb at end)
+        ]
+      },
+      {
+        // French to English Noun-Adjective swap
+        source: ["Le", "chat", "noir", "dort", "ici"],
+        target: ["The", "black", "cat", "sleeps", "here"],
+        energies: [
+          [3.4, 0.3, 0.1, 0.1, 0.1], // "The" -> "Le"
+          [0.2, 0.5, 3.5, 0.1, 0.1], // "black" -> "noir"
+          [0.3, 3.5, 0.5, 0.1, 0.1], // "cat" -> "chat"
+          [0.1, 0.3, 0.1, 3.5, 0.3], // "sleeps" -> "dort"
+          [0.1, 0.1, 0.1, 0.3, 3.5]  // "here" -> "ici"
+        ]
+      }
+    ];
+
+    const STEP_INFO = [
+      {
+        desc: "Full NMT Pipeline: Unlike standard Seq2Seq which crushes the entire source sentence into one fixed vector, Bahdanau Attention dynamically queries all Encoder states at every decoding step.",
+        latex: "p(y_i \\mid y_1, \\dots, y_{i-1}, \\mathbf{x}) = g(y_{i-1}, s_i, c_i)",
+        camPos: new THREE.Vector3(0, 11, 25),
+        camTarget: new THREE.Vector3(0, 0, 0)
+      },
+      {
+        desc: "Stage 1 (Bidirectional RNN Encoder): Forward (Cyan) and Backward (Magenta) RNNs read the source sentence in both directions. Concatenating them creates context-rich annotations h_j.",
+        latex: "h_j = \\left[ \\overrightarrow{h}_j^T ; \\overleftarrow{h}_j^T \\right]^T",
+        camPos: new THREE.Vector3(-4, 5, -5),
+        camTarget: new THREE.Vector3(0, 0, -10)
+      },
+      {
+        desc: "Stage 2 (Additive Alignment Model): Before emitting target word y_i, a feedforward network (a) scores how well previous Decoder state s_{i-1} aligns with each Encoder annotation h_j.",
+        latex: "e_{i,j} = v_a^T \\tanh(W_a s_{i-1} + U_a h_j)",
+        camPos: new THREE.Vector3(6, 6, 3),
+        camTarget: new THREE.Vector3(0, 0, -1)
+      },
+      {
+        desc: "Stage 3 (Softmax & Dynamic Context Vector c_i): Alignment scores e_{i,j} are normalized into probabilities α_{i,j}. The Context Hub c_i is computed as the weighted sum of annotations h_j.",
+        latex: "\\alpha_{i,j} = \\frac{\\exp(e_{i,j})}{\\sum_k \\exp(e_{i,k})}, \\quad c_i = \\sum_{j=1}^{T_x} \\alpha_{i,j} h_j",
+        camPos: new THREE.Vector3(0, 8, 7),
+        camTarget: new THREE.Vector3(0, 0, 0)
+      },
+      {
+        desc: "Stage 4 (Decoder RNN Transition & Output): The Decoder updates its hidden state s_i using previous state s_{i-1}, previous token y_{i-1}, and the newly focused Context Vector c_i.",
+        latex: "s_i = f(s_{i-1}, y_{i-1}, c_i)",
+        camPos: new THREE.Vector3(4, 5, 19),
+        camTarget: new THREE.Vector3(0, 0, 9)
+      }
+    ];
+
+    // ==========================================
+    // 2. APPLICATION STATE
+    // ==========================================
+    const state = {
+      presetIdx: 0,
+      targetIdx: 2,       // Default to "zone" (shows non-monotonic jump to "Area")
+      temperature: 0.75,
+      bottleneckMode: false,
+      stepIdx: 0,
+      playing: false,
+      alphaMatrix: []     // Target_len x Source_len attention weights
+    };
+
+    // Z-Axis Stage Coordinates
+    const Z_ENC = -10;
+    const Z_HUB = 0;
+    const Z_DEC = 10;
+
+    // ==========================================
+    // 3. THREE.JS SCENE INITIALIZATION
+    // ==========================================
+    const container = document.getElementById('canvas-container');
+    const labelsContainer = document.getElementById('labels-container');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0f19);
+    scene.fog = new THREE.FogExp2(0x0b0f19, 0.015);
+
+    const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 200);
+    camera.position.copy(STEP_INFO[0].camPos);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.maxDistance = 58;
+    controls.minDistance = 6;
+
+    let camAnimActive = false;
+    const desiredCamPos = new THREE.Vector3();
+    const desiredCamTarget = new THREE.Vector3();
+    controls.addEventListener('start', () => { camAnimActive = false; });
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+    const dirLight = new THREE.DirectionalLight(0x38bdf8, 1.4);
+    dirLight.position.set(14, 24, 18);
+    scene.add(dirLight);
+    const goldLight = new THREE.PointLight(0xf6d365, 2.0, 45);
+    goldLight.position.set(0, 5, 0);
+    scene.add(goldLight);
+
+    // Space Grid
+    const grid = new THREE.GridHelper(44, 44, 0x1e293b, 0x0f172a);
+    grid.position.y = -4.2;
+    scene.add(grid);
+
+    // Stage Guide Planes
+    function createStagePlane(z, colorHex) {
+      const geo = new THREE.PlaneGeometry(24, 7.2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity: 0.04,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(0, 0, z);
+      const edges = new THREE.EdgesGeometry(geo);
+      mesh.add(new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: colorHex, transparent: true, opacity: 0.24 })));
+      scene.add(mesh);
+    }
+
+    createStagePlane(Z_ENC, 0x00f2fe);
+    createStagePlane(Z_HUB, 0xf6d365);
+    createStagePlane(Z_DEC, 0x10b981);
+
+    // Animated Pulse Texture
+    function createFlowTexture(c1, c2) {
+      const c = document.createElement('canvas');
+      c.width = 128;
+      c.height = 32;
+      const ctx = c.getContext('2d');
+      const grad = ctx.createLinearGradient(0, 0, 128, 0);
+      grad.addColorStop(0.0, 'rgba(15, 23, 42, 0.1)');
+      grad.addColorStop(0.4, c1);
+      grad.addColorStop(0.5, '#ffffff');
+      grad.addColorStop(0.6, c2);
+      grad.addColorStop(1.0, 'rgba(15, 23, 42, 0.1)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 128, 32);
+      const tex = new THREE.CanvasTexture(c);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      return tex;
+    }
+
+    const baseBeamTexture = createFlowTexture('rgba(0, 242, 254, 0.95)', 'rgba(246, 211, 101, 0.95)');
+    const queryBeamTexture = createFlowTexture('rgba(168, 85, 247, 0.95)', 'rgba(0, 242, 254, 0.95)');
+
+    const dynamicGroup = new THREE.Group();
+    scene.add(dynamicGroup);
+
+    let clickableMeshes = [];
+    let worldLabels = [];
+    let activeBeams = [];
+    let spinningNodes = [];
+
+    // ==========================================
+    // 4. ALIGNMENT COMPUTATION (BAHDANAU VS BOTTLENECK)
+    // ==========================================
+    function computeAlignmentMatrix() {
+      const preset = PRESETS[state.presetIdx];
+      const Tx = preset.source.length;
+      const Ty = preset.target.length;
+
+      state.alphaMatrix = [];
+      for (let i = 0; i < Ty; i++) {
+        if (state.bottleneckMode) {
+          // Fixed Bottleneck Seq2Seq: 100% weight forced onto final Encoder state h_{Tx}
+          const row = new Array(Tx).fill(0);
+          row[Tx - 1] = 1.0;
+          state.alphaMatrix.push(row);
+        } else {
+          const rawRow = preset.energies[i];
+          let maxE = -Infinity;
+          const scaled = rawRow.map(e => {
+            const val = e / state.temperature;
+            if (val > maxE) maxE = val;
+            return val;
+          });
+          let sumExp = 0;
+          const exps = scaled.map(v => {
+            const ex = Math.exp(v - maxE);
+            sumExp += ex;
+            return ex;
+          });
+          state.alphaMatrix.push(exps.map(ex => ex / sumExp));
+        }
+      }
+    }
+
+    // ==========================================
+    // 5. BUILD 3D ENCODER-DECODER SCENE
+    // ==========================================
+    function clearDynamicScene() {
+      while (dynamicGroup.children.length > 0) {
+        const obj = dynamicGroup.children[0];
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+          if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+          else obj.material.dispose();
+        }
+        dynamicGroup.remove(obj);
+      }
+      labelsContainer.innerHTML = '';
+      clickableMeshes = [];
+      worldLabels = [];
+      activeBeams = [];
+      spinningNodes = [];
+    }
+
+    function addWorldLabel(html, pos3D, extraClass = '', targetIdx = null) {
+      const div = document.createElement('div');
+      div.className = `world-label ${extraClass}`;
+      div.innerHTML = html;
+      if (targetIdx !== null) {
+        div.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectTargetStep(targetIdx);
+        });
+      }
+      labelsContainer.appendChild(div);
+      worldLabels.push({ el: div, pos: pos3D.clone() });
+      return div;
+    }
+
+    function buildScene() {
+      clearDynamicScene();
+      computeAlignmentMatrix();
+
+      const preset = PRESETS[state.presetIdx];
+      const srcTokens = preset.source;
+      const tgtTokens = preset.target;
+      const Tx = srcTokens.length;
+      const Ty = tgtTokens.length;
+
+      const srcSpacing = 3.2;
+      const tgtSpacing = 3.4;
+      const srcStartX = -((Tx - 1) * srcSpacing) / 2;
+      const tgtStartX = -((Ty - 1) * tgtSpacing) / 2;
+
+      const i = state.targetIdx;
+      const alphas = state.alphaMatrix[i];
+
+      // Stage Headers
+      addWorldLabel("1. BiRNN Encoder Annotations hⱼ = [h⃗ⱼ ; h⃖ⱼ]", new THREE.Vector3(0, 4.1, Z_ENC), "stage-header");
+      addWorldLabel(
+        state.bottleneckMode
+          ? "2. Fixed Bottleneck Vector (Only Final h_Tx Passed!)"
+          : "2. Additive Alignment & Dynamic Context Hub (cᵢ = ∑ αᵢⱼ hⱼ)",
+        new THREE.Vector3(0, 4.1, Z_HUB),
+        "stage-header"
+      );
+      addWorldLabel("3. Autoregressive Decoder RNN States (sᵢ → yᵢ)", new THREE.Vector3(0, 4.1, Z_DEC), "stage-header");
+
+      // ---- STAGE 1: BIDIRECTIONAL RNN ENCODER ----
+      let weightedContextX = 0;
+      const encoderPositions = [];
+
+      for (let j = 0; j < Tx; j++) {
+        const x = srcStartX + j * srcSpacing;
+        const alpha = alphas[j];
+        weightedContextX += alpha * x;
+        const hPos = new THREE.Vector3(x, 0, Z_ENC);
+        encoderPositions.push(hPos);
+
+        // Forward RNN state (Top half cylinder - Cyan)
+        const fwdGeo = new THREE.CylinderGeometry(0.48, 0.48, 0.65, 24);
+        const fwdMat = new THREE.MeshStandardMaterial({
+          color: 0x00f2fe,
+          emissive: 0x00f2fe,
+          emissiveIntensity: 0.25 + alpha * 0.85,
+          roughness: 0.25,
+          metalness: 0.5
+        });
+        const fwdMesh = new THREE.Mesh(fwdGeo, fwdMat);
+        fwdMesh.position.set(x, 0.42, Z_ENC);
+        dynamicGroup.add(fwdMesh);
+
+        // Backward RNN state (Bottom half cylinder - Magenta)
+        const bwdGeo = new THREE.CylinderGeometry(0.48, 0.48, 0.65, 24);
+        const bwdMat = new THREE.MeshStandardMaterial({
+          color: 0xff0844,
+          emissive: 0xff0844,
+          emissiveIntensity: 0.25 + alpha * 0.85,
+          roughness: 0.25,
+          metalness: 0.5
+        });
+        const bwdMesh = new THREE.Mesh(bwdGeo, bwdMat);
+        bwdMesh.position.set(x, -0.42, Z_ENC);
+        dynamicGroup.add(bwdMesh);
+
+        // Outer Halo Ring proportional to alpha_ij
+        const ringGeo = new THREE.TorusGeometry(0.75 + alpha * 0.35, 0.045, 12, 36);
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: alpha > 0.25 ? 0xf6d365 : 0x475569,
+          transparent: true,
+          opacity: 0.3 + alpha * 0.7
+        });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.position.copy(hPos);
+        dynamicGroup.add(ring);
+        spinningNodes.push(ring);
+
+        // Forward/Backward Horizontal Sequence Arrows between Encoder states
+        if (j < Tx - 1) {
+          const nextX = srcStartX + (j + 1) * srcSpacing;
+          // Forward line (top)
+          const fPts = [new THREE.Vector3(x + 0.5, 0.5, Z_ENC), new THREE.Vector3(nextX - 0.5, 0.5, Z_ENC)];
+          dynamicGroup.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(fPts),
+            new THREE.LineBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.5 })
+          ));
+          // Backward line (bottom)
+          const bPts = [new THREE.Vector3(nextX - 0.5, -0.5, Z_ENC), new THREE.Vector3(x + 0.5, -0.5, Z_ENC)];
+          dynamicGroup.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(bPts),
+            new THREE.LineBasicMaterial({ color: 0xff0844, transparent: true, opacity: 0.5 })
+          ));
+        }
+
+        // Source Token Label + Alignment Weight Badge
+        addWorldLabel(
+          `${srcTokens[j]} <span class="weight-badge">${(alpha * 100).toFixed(0)}%</span>`,
+          new THREE.Vector3(x, -1.55, Z_ENC)
+        );
+      }
+
+      // ---- STAGE 2: DYNAMIC CONTEXT HUB (c_i) ----
+      const decX = tgtStartX + i * tgtSpacing;
+      const hubX = state.bottleneckMode
+        ? srcStartX + (Tx - 1) * srcSpacing * 0.5
+        : THREE.MathUtils.lerp(weightedContextX, decX, 0.35);
+      const hubPos = new THREE.Vector3(hubX, 0.3, Z_HUB);
+
+      const hubGeo = new THREE.OctahedronGeometry(0.85, 2);
+      const hubMat = new THREE.MeshStandardMaterial({
+        color: state.bottleneckMode ? 0xef4444 : 0xf6d365,
+        emissive: state.bottleneckMode ? 0xb91c1c : 0xf59e0b,
+        emissiveIntensity: 0.85,
+        wireframe: false,
+        roughness: 0.15,
+        metalness: 0.7
+      });
+      const hubMesh = new THREE.Mesh(hubGeo, hubMat);
+      hubMesh.position.copy(hubPos);
+      dynamicGroup.add(hubMesh);
+      spinningNodes.push(hubMesh);
+
+      addWorldLabel(
+        state.bottleneckMode
+          ? `Bottleneck c = h_${Tx} (Lossy!)`
+          : `Context Vector c<sub>${i + 1}</sub>`,
+        new THREE.Vector3(hubPos.x, hubPos.y + 1.35, hubPos.z),
+        "context-hub"
+      );
+
+      // Attention Beams from Encoder Annotations h_j -> Context Hub c_i
+      for (let j = 0; j < Tx; j++) {
+        const alpha = alphas[j];
+        if (state.bottleneckMode && j < Tx - 1) continue;
+
+        const startPos = encoderPositions[j];
+        const midPos = new THREE.Vector3(
+          (startPos.x + hubPos.x) * 0.5,
+          0.9 + alpha * 2.2,
+          (Z_ENC + Z_HUB) * 0.5
+        );
+        const curve = new THREE.QuadraticBezierCurve3(startPos, midPos, hubPos);
+        const radius = Math.max(0.025, alpha * 0.36);
+        const tubeGeo = new THREE.TubeGeometry(curve, 32, radius, 12, false);
+
+        const tex = baseBeamTexture.clone();
+        tex.needsUpdate = true;
+        tex.repeat.set(3, 1);
+
+        const tubeMat = new THREE.MeshStandardMaterial({
+          map: tex,
+          color: 0xffffff,
+          emissive: state.bottleneckMode ? new THREE.Color(0xef4444) : new THREE.Color().lerpColors(new THREE.Color(0x00f2fe), new THREE.Color(0xf6d365), alpha),
+          emissiveIntensity: 0.25 + alpha * 0.85,
+          transparent: true,
+          opacity: Math.max(0.14, alpha * 0.95)
+        });
+        dynamicGroup.add(new THREE.Mesh(tubeGeo, tubeMat));
+        activeBeams.push({ tex, speed: 0.008 + alpha * 0.04 });
+      }
+
+      // ---- STAGE 3: AUTOREGRESSIVE DECODER RNN (s_i -> y_i) ----
+      for (let t = 0; t < Ty; t++) {
+        const x = tgtStartX + t * tgtSpacing;
+        const isCurrent = (t === i);
+        const isPast = (t < i);
+        const sPos = new THREE.Vector3(x, 0, Z_DEC);
+
+        // Decoder Hidden State Cube s_t
+        const decGeo = new THREE.BoxGeometry(isCurrent ? 0.95 : 0.7, isCurrent ? 0.95 : 0.7, isCurrent ? 0.95 : 0.7);
+        const decMat = new THREE.MeshStandardMaterial({
+          color: isCurrent ? 0x10b981 : (isPast ? 0x059669 : 0x334155),
+          emissive: isCurrent ? 0x10b981 : (isPast ? 0x065f46 : 0x000000),
+          emissiveIntensity: isCurrent ? 0.9 : (isPast ? 0.35 : 0.0),
+          transparent: true,
+          opacity: t > i ? 0.45 : 1.0,
+          roughness: 0.2
+        });
+        const decMesh = new THREE.Mesh(decGeo, decMat);
+        decMesh.position.copy(sPos);
+        decMesh.userData = { targetIdx: t };
+        dynamicGroup.add(decMesh);
+        clickableMeshes.push(decMesh);
+        if (isCurrent) spinningNodes.push(decMesh);
+
+        // Autoregressive Recurrent Link s_{t-1} -> s_t
+        if (t < Ty - 1) {
+          const nextX = tgtStartX + (t + 1) * tgtSpacing;
+          const pts = [new THREE.Vector3(x + 0.5, 0, Z_DEC), new THREE.Vector3(nextX - 0.5, 0, Z_DEC)];
+          dynamicGroup.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            new THREE.LineBasicMaterial({
+              color: t < i ? 0x10b981 : 0x334155,
+              transparent: true,
+              opacity: t < i ? 0.85 : 0.35
+            })
+          ));
+        }
+
+        // Previous Decoder State s_{i-1} Query Feedback Arc into Alignment Model
+        if (t === i - 1 && !state.bottleneckMode) {
+          const qCurve = new THREE.QuadraticBezierCurve3(
+            sPos,
+            new THREE.Vector3((sPos.x + hubPos.x) * 0.5, -1.6, (Z_DEC + Z_HUB) * 0.5),
+            hubPos
+          );
+          const qTex = queryBeamTexture.clone();
+          qTex.needsUpdate = true;
+          qTex.repeat.set(2, 1);
+          const qTube = new THREE.Mesh(
+            new THREE.TubeGeometry(qCurve, 24, 0.08, 8, false),
+            new THREE.MeshBasicMaterial({ map: qTex, transparent: true, opacity: 0.85 })
+          );
+          dynamicGroup.add(qTube);
+          activeBeams.push({ tex: qTex, speed: 0.022 });
+
+          addWorldLabel(
+            `Query s<sub>${i}</sub>`,
+            new THREE.Vector3((sPos.x + hubPos.x) * 0.5, -1.2, (Z_DEC + Z_HUB) * 0.5)
+          );
+        }
+
+        // Feed Context Hub c_i into active Decoder State s_i
+        if (isCurrent) {
+          const cCurve = new THREE.QuadraticBezierCurve3(
+            hubPos,
+            new THREE.Vector3((hubPos.x + sPos.x) * 0.5, 1.4, (Z_HUB + Z_DEC) * 0.5),
+            sPos
+          );
+          const cTex = baseBeamTexture.clone();
+          cTex.needsUpdate = true;
+          cTex.repeat.set(2, 1);
+
+          const cTube = new THREE.Mesh(
+            new THREE.TubeGeometry(cCurve, 28, 0.22, 12, false),
+            new THREE.MeshStandardMaterial({
+              map: cTex,
+              color: 0xf6d365,
+              emissive: 0x10b981,
+              emissiveIntensity: 0.7,
+              transparent: true,
+              opacity: 0.95
+            })
+          );
+          dynamicGroup.add(cTube);
+          activeBeams.push({ tex: cTex, speed: 0.03 });
+        }
+
+        // Emitted Target Word Label y_t
+        addWorldLabel(
+          `y<sub>${t + 1}</sub>: "${tgtTokens[t]}"`,
+          new THREE.Vector3(x, 1.25, Z_DEC),
+          isCurrent ? 'active-target' : '',
+          t
+        );
+      }
+
+      renderTargetPills();
+      drawAlignmentMatrix();
+    }
+
+    // ==========================================
+    // 6. 2D ALIGNMENT MATRIX & UI CONTROLS
+    // ==========================================
+    const heatmapCanvas = document.getElementById('heatmap-canvas');
+    const hCtx = heatmapCanvas.getContext('2d');
+
+    function drawAlignmentMatrix() {
+      const preset = PRESETS[state.presetIdx];
+      const src = preset.source;
+      const tgt = preset.target;
+      const Tx = src.length;
+      const Ty = tgt.length;
+
+      const W = heatmapCanvas.width;
+      const H = heatmapCanvas.height;
+      const padLeft = 56;
+      const padTop = 44;
+      const cellW = (W - padLeft - 6) / Tx;
+      const cellH = (H - padTop - 6) / Ty;
+
+      hCtx.clearRect(0, 0, W, H);
+      hCtx.font = '10px Inter, sans-serif';
+
+      // Source Column Headers
+      for (let j = 0; j < Tx; j++) {
+        hCtx.save();
+        hCtx.translate(padLeft + j * cellW + cellW * 0.5, padTop - 6);
+        hCtx.rotate(-Math.PI / 5);
+        hCtx.textAlign = 'left';
+        hCtx.fillStyle = '#38bdf8';
+        hCtx.fillText(src[j].slice(0, 7), 0, 0);
+        hCtx.restore();
+      }
+
+      // Target Rows & Alignment Cells
+      for (let r = 0; r < Ty; r++) {
+        hCtx.fillStyle = (r === state.targetIdx) ? '#10b981' : '#94a3b8';
+        hCtx.textAlign = 'right';
+        hCtx.fillText(tgt[r].slice(0, 8), padLeft - 6, padTop + r * cellH + cellH * 0.62);
+
+        for (let c = 0; c < Tx; c++) {
+          const w = state.alphaMatrix[r][c];
+          const x = padLeft + c * cellW;
+          const y = padTop + r * cellH;
+
+          const red = Math.round(15 + w * 235);
+          const green = Math.round(25 + w * 185);
+          const blue = Math.round(45 + (1 - w) * 90);
+          hCtx.fillStyle = `rgba(${red}, ${green}, ${blue}, ${0.22 + w * 0.78})`;
+          hCtx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+
+          if (r === state.targetIdx) {
+            hCtx.strokeStyle = '#10b981';
+            hCtx.lineWidth = 1.5;
+            hCtx.strokeRect(x + 1, y + 1, cellW - 2, cellH - 2);
+          }
+        }
+      }
+    }
+
+    heatmapCanvas.addEventListener('click', (e) => {
+      const rect = heatmapCanvas.getBoundingClientRect();
+      const scaleY = heatmapCanvas.height / rect.height;
+      const y = (e.clientY - rect.top) * scaleY;
+      const padTop = 44;
+      const Ty = PRESETS[state.presetIdx].target.length;
+      const cellH = (heatmapCanvas.height - padTop - 6) / Ty;
+      const row = Math.floor((y - padTop) / cellH);
+      if (row >= 0 && row < Ty) {
+        selectTargetStep(row);
+      }
+    });
+
+    function renderTargetPills() {
+      const containerEl = document.getElementById('target-pills');
+      containerEl.innerHTML = '<span class="pill-bar-label">Decoder Step yᵢ:</span>';
+      const tgtTokens = PRESETS[state.presetIdx].target;
+      tgtTokens.forEach((tok, idx) => {
+        const btn = document.createElement('button');
+        btn.className = `token-pill ${idx === state.targetIdx ? 'active' : ''}`;
+        btn.textContent = `${idx + 1}. ${tok}`;
+        btn.addEventListener('click', () => selectTargetStep(idx));
+        containerEl.appendChild(btn);
+      });
+    }
+
+    function selectTargetStep(idx) {
+      state.targetIdx = idx;
+      buildScene();
+    }
+
+    function updateStepExplanation(stepIdx) {
+      state.stepIdx = stepIdx;
+      const info = STEP_INFO[stepIdx];
+      document.getElementById('math-desc').textContent = info.desc;
+
+      const formulaEl = document.getElementById('math-formula');
+      if (window.katex) {
+        window.katex.render(info.latex, formulaEl, { throwOnError: false });
+      } else {
+        formulaEl.textContent = info.latex;
+      }
+
+      desiredCamPos.copy(info.camPos);
+      desiredCamTarget.copy(info.camTarget);
+      camAnimActive = true;
+    }
+
+    // ==========================================
+    // 7. EVENT LISTENERS & AUTO-DECODE TIMER
+    // ==========================================
+    document.getElementById('preset-select').addEventListener('change', (e) => {
+      state.presetIdx = parseInt(e.target.value, 10);
+      state.targetIdx = 0;
+      buildScene();
+    });
+
+    document.getElementById('temp-slider').addEventListener('input', (e) => {
+      state.temperature = parseFloat(e.target.value);
+      document.getElementById('temp-val').textContent = state.temperature.toFixed(2);
+      buildScene();
+    });
+
+    document.querySelectorAll('#mode-buttons .seg-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#mode-buttons .seg-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.bottleneckMode = (btn.dataset.bottleneck === 'true');
+        document.getElementById('mode-label').textContent = state.bottleneckMode ? 'Fixed Bottleneck' : 'Bahdanau Attn';
+        buildScene();
+      });
+    });
+
+    // Auto-Play Decoder Timesteps
+    let playInterval = null;
+    const playBtn = document.getElementById('play-btn');
+    const playStatus = document.getElementById('play-status');
+
+    function togglePlay() {
+      state.playing = !state.playing;
+      if (state.playing) {
+        playBtn.textContent = '⏸ Pause';
+        playBtn.classList.add('active');
+        playStatus.textContent = 'Decoding...';
+        playInterval = setInterval(() => {
+          const Ty = PRESETS[state.presetIdx].target.length;
+          selectTargetStep((state.targetIdx + 1) % Ty);
+        }, 1600);
+      } else {
+        playBtn.textContent = '▶ Play Steps';
+        playBtn.classList.remove('active');
+        playStatus.textContent = 'Paused';
+        clearInterval(playInterval);
+      }
+    }
+
+    playBtn.addEventListener('click', togglePlay);
+    document.getElementById('step-next-btn').addEventListener('click', () => {
+      const Ty = PRESETS[state.presetIdx].target.length;
+      selectTargetStep((state.targetIdx + 1) % Ty);
+    });
+
+    document.querySelectorAll('#stepper-buttons .step-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#stepper-buttons .step-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        updateStepExplanation(parseInt(btn.dataset.step, 10));
+      });
+    });
+
+    const drawer = document.getElementById('control-drawer');
+    document.getElementById('drawer-toggle').addEventListener('click', () => {
+      drawer.classList.toggle('collapsed');
+    });
+
+    // 3D Raycasting on Decoder Cubes
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let downPos = { x: 0, y: 0 };
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      downPos = { x: e.clientX, y: e.clientY };
+    });
+
+    renderer.domElement.addEventListener('pointerup', (e) => {
+      if (Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 6) return;
+      pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+      pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObjects(clickableMeshes, false);
+      if (hits.length > 0 && hits[0].object.userData.targetIdx !== undefined) {
+        selectTargetStep(hits[0].object.userData.targetIdx);
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ==========================================
+    // 8. RENDER LOOP & 2D OVERLAY PROJECTION
+    // ==========================================
+    const projVec = new THREE.Vector3();
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const elapsed = clock.getElapsedTime();
+
+      for (const beam of activeBeams) {
+        beam.tex.offset.x -= beam.speed;
+      }
+
+      spinningNodes.forEach((node, idx) => {
+        node.rotation.y = elapsed * 0.85 + idx * 0.5;
+      });
+
+      if (camAnimActive) {
+        camera.position.lerp(desiredCamPos, 0.06);
+        controls.target.lerp(desiredCamTarget, 0.06);
+        if (camera.position.distanceTo(desiredCamPos) < 0.08) {
+          camAnimActive = false;
+        }
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+
+      const halfW = window.innerWidth / 2;
+      const halfH = window.innerHeight / 2;
+
+      for (const item of worldLabels) {
+        projVec.copy(item.pos);
+        projVec.project(camera);
+        if (projVec.z > 1) {
+          item.el.style.display = 'none';
+        } else {
+          item.el.style.display = 'block';
+          item.el.style.left = `${(projVec.x * halfW) + halfW}px`;
+          item.el.style.top = `${-(projVec.y * halfH) + halfH}px`;
+        }
+      }
+    }
+
+    buildScene();
+    updateStepExplanation(0);
+    animate();
+  </script>
+</body>
+</html>
